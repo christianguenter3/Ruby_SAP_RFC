@@ -8,7 +8,7 @@ class FM_Interface
 	SYSTEM = "Y:\\60_RUBY\\20_test_sapnwrfc\\DV1.yml"		
 
 	def initialize		
-		@result = ""
+		@result = []
 	end
 
 	def max_len(f)
@@ -46,41 +46,48 @@ class FM_Interface
 						  k == "TYP"  }.each do |k,v|
 			case k
 			  when "DBFIELD"
-			 	@result += "TYPE #{v.strip.downcase},\n" if v.strip != ""
+			 	@result << "TYPE #{v.strip.downcase},\n" if v.strip != ""
 			  when "DBSTRUCT"
-			 	@result += "TYPE STANDARD TABLE OF #{v.strip.downcase},\n" if v.strip != ""
+			 	@result << "TYPE STANDARD TABLE OF #{v.strip.downcase},\n" if v.strip != ""
 			  when "TYP"
-			 	@result += "TYPE #{v.strip.downcase { |n|  }},\n" if v.strip != ""
+			 	@result << "TYPE #{v.strip.downcase { |n|  }},\n" if v.strip != ""
 			else				
-				@result += "      #{v.strip.downcase} ".ljust(len + 7)
+				@result << "      #{v.strip.downcase} ".ljust(len + 7)
 			end 
 		end
 	end
 
 	def get_interface(object)		
 		def add_data
-			@result = "DATA: " + @result.strip		
+			@result[0] = "DATA: " + @result[0].lstrip
 		end
 
 		def change_last_char_to_point
-			@result.chop!
-			@result += "."				
+			@result[@result.length - 1] = @result[@result.length - 1].chop.chop
+			if @result[@result.length - 1] =~ /["|\*]/
+				@result << "\n."				
+			else
+				@result << "."
+			end
 		end
 
 		if object =~ /=>/
 			get_method_interface(object)
 			add_data
 			change_last_char_to_point
+			@result << "\n"
+			@result << "\n"
+			get_method_stub(object)
 		else
 			get_fm_interface(object)
 			add_data
 			change_last_char_to_point
-			@result += "\n"
-			@result += "\n"
+			@result << "\n"
+			@result << "\n"
 			get_fm_stub(object)
 		end			
 
-		Clipboard.copy(@result)
+		Clipboard.copy(@result.join(""))
 	end
 
 	def get_method_interface(object)
@@ -104,15 +111,15 @@ class FM_Interface
 				line.select{|k,v| k == "SCONAME" || k == "TYPE" || k == "TYPTYPE"}.each do |k,v|
 					case k
 						when "TYPE"													
-							@result += " #{v.strip},\n".downcase
+							@result << " #{v.strip},\n".downcase
 						when "TYPTYPE"
 							if v == "1"
-								@result += " TYPE"
+								@result << " TYPE"
 							elsif v == "3"
-								@result += " TYPE REF TO"	
+								@result << " TYPE REF TO"	
 							end	
 						else
-							@result += "      #{v.strip} ".ljust(len + 7).downcase
+							@result << "      #{v.strip} ".ljust(len + 7).downcase
 					end					
 				end
 			end
@@ -151,21 +158,38 @@ class FM_Interface
 
 			f.invoke_new
 
-			f.SOURCE.each do |line|
-				line.each do |k,v|
-					if v =~ /(")?(.*)=(.*)/
-						@result += "#{$1} #{$2}= #{$2.strip}\n"
-					else
-						@result += "#{v}\n"
-					end
-				end				
-			end
+			source_processing(f.SOURCE)			
+		end
+	end
 
-			Clipboard.copy(@result)
+	def get_method_stub(object)
+		call("Z_METHOD_STUB_GENERATE",SYSTEM) do |f|			
+			object =~ /(.*)=>(.*)/
+
+			f.MTDKEY = { "CLSNAME" => $1,
+						 "CPDNAME" => $2 }
+
+			f.invoke_new
+
+			source_processing(f.PATTERNSOURCE)
+		end
+	end
+
+	def source_processing(source)
+		source.each do |line|
+			line.each do |k,v|
+				if v =~ /(["|\*])?(.*)=[^>](.*)/
+					@result << "#{"*" if $1} #{$2 if $2}= #{$3.strip} \n".downcase
+				elsif v =~ /(")(.*)/
+					@result << "*#{$2}\n"
+				else
+					@result << "#{v}\n"
+				end
+			end				
 		end
 	end
 end
 
 fm_if = FM_Interface.new
-fm_if.get_interface(ARGV[0])                                            
-#fm_if.get_fm_stub(ARGV[0])
+fm_if.get_interface(ARGV[0].upcase)                                            
+
