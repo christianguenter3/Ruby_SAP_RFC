@@ -5,7 +5,11 @@ require 'clipboard'
 class FM_Interface 
 	include SAPCall
 
-	SYSTEM = "Y:\\60_RUBY\\20_test_sapnwrfc\\DV1.yml"
+	SYSTEM = "Y:\\60_RUBY\\20_test_sapnwrfc\\DV1.yml"		
+
+	def initialize		
+		@result = ""
+	end
 
 	def max_len(f)
 		len = 0
@@ -53,19 +57,28 @@ class FM_Interface
 		end
 	end
 
-	def get_interface(object)
-		@result = ""
+	def get_interface(object)		
+		def add_data
+			@result = "DATA: " + @result.strip		
+		end
+
+		def change_last_char_to_point
+			@result.chop!
+			@result += "."				
+		end
 
 		if object =~ /=>/
 			get_method_interface(object)
+			add_data
+			change_last_char_to_point
 		else
 			get_fm_interface(object)
-		end		
-
-		@result = "DATA: " + @result.strip
-
-		@result.chop!
-		@result += "."
+			add_data
+			change_last_char_to_point
+			@result += "\n"
+			@result += "\n"
+			get_fm_stub(object)
+		end			
 
 		Clipboard.copy(@result)
 	end
@@ -131,7 +144,28 @@ class FM_Interface
 			end			
 		end		
 	end
+
+	def get_fm_stub(function_module)
+		call("Z_FUNCTION_STUB_GENERATE",SYSTEM) do |f|
+			f.FUNCNAME = function_module
+
+			f.invoke_new
+
+			f.SOURCE.each do |line|
+				line.each do |k,v|
+					if v =~ /(")?(.*)=(.*)/
+						@result += "#{$1} #{$2}= #{$2.strip}\n"
+					else
+						@result += "#{v}\n"
+					end
+				end				
+			end
+
+			Clipboard.copy(@result)
+		end
+	end
 end
 
 fm_if = FM_Interface.new
 fm_if.get_interface(ARGV[0])                                            
+#fm_if.get_fm_stub(ARGV[0])
