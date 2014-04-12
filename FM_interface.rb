@@ -43,7 +43,7 @@ class FM_Interface
 	def line_processing(line, len)
 		line.select{|k,v| k == "PARAMETER" or 
 						  k =~ /DB/ or
-						  k == "TYP"  }.each do |k,v|
+						  k == "TYP" }.each do |k,v|
 			case k
 			  when "DBFIELD"
 			 	@result << "TYPE #{v.strip.downcase},\n" if v.strip != ""
@@ -52,19 +52,23 @@ class FM_Interface
 			  when "TYP"
 			 	@result << "TYPE #{v.strip.downcase { |n|  }},\n" if v.strip != ""
 			else				
-				@result << "      #{v.strip.downcase} ".ljust(len + 7)
+				@result << "#{"*" if line["OPTIONAL"] == "X"}     #{v.strip.downcase} ".ljust(len + 7)
 			end 
 		end
 	end
 
 	def get_interface(object)		
 		def add_data
-			@result[0] = "DATA: " + @result[0].lstrip
+			if @result[0] =~ /.*\*.*/				
+				@result.insert(0, "DATA: \n")
+			else
+				@result[0] = "DATA: " + @result[0].lstrip 		
+			end			
 		end
 
 		def change_last_char_to_point
-			@result[@result.length - 1] = @result[@result.length - 1].chop.chop
-			if @result[@result.length - 1] =~ /["|\*]/
+			@result[-1] = @result[-1].chop.chop			
+			if @result[-2] =~ /.*["|\*]/
 				@result << "\n."				
 			else
 				@result << "."
@@ -119,7 +123,7 @@ class FM_Interface
 								@result << " TYPE REF TO"	
 							end	
 						else
-							@result << "      #{v.strip} ".ljust(len + 7).downcase
+							@result << "#{"*" if line["PAROPTIONL"] == "X"}      #{v.strip} ".ljust(len + 7).downcase
 					end					
 				end
 			end
