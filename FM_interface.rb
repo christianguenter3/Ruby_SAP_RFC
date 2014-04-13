@@ -1,199 +1,278 @@
 require_relative 'SAPCall.rb'
-
 require 'clipboard'
 
-class FM_Interface 
-	include SAPCall
+class FM_Interface
+  include SAPCall
+  SYSTEM = "Y:\\60_RUBY\\20_test_sapnwrfc\\DV1.yml"
 
-	SYSTEM = "Y:\\60_RUBY\\20_test_sapnwrfc\\DV1.yml"		
+  def initialize
+    @result = []
+  end
 
-	def initialize		
-		@result = []
-	end
+  def max_len(f)
+    len = 0
 
-	def max_len(f)
-		len = 0
+    def len(line,len)
+      line.select{|k,v| k == "PARAMETER" }.each do |k,v|
+        len = v.strip.length if v.strip.length > len
+      end
+      len
+    end
 
-		def len(line,len)
-			line.select{|k,v| k == "PARAMETER" }.each do |k,v|
-				len = v.strip.length if v.strip.length > len
-			end			
-			len
-		end
+    f.IMPORT_PARAMETER.each do |line|
+      len = len(line,len)
+    end
 
-		f.IMPORT_PARAMETER.each do |line|
-			len = len(line,len)
-		end	
+    f.EXPORT_PARAMETER.each do |line|
+      len = len(line,len)
+    end
 
-		f.EXPORT_PARAMETER.each do |line|
-			len = len(line,len)
-		end	
+    f.CHANGING_PARAMETER.each do |line|
+      len = len(line,len)
+    end
 
-		f.CHANGING_PARAMETER.each do |line|
-			len = len(line,len)
-		end	
+    f.TABLES_PARAMETER.each do |line|
+      len = len(line,len)
+    end
 
-		f.TABLES_PARAMETER.each do |line|
-			len = len(line,len)
-		end	
+    len
+  end
 
-		len
-	end
+  def is_method_call?(object)
+    object =~ /[=|-]>/
+  end
 
-	def line_processing(line, len)
-		line.select{|k,v| k == "PARAMETER" or 
-						  k =~ /DB/ or
-						  k == "TYP" }.each do |k,v|
-			case k
-			  when "DBFIELD"
-			 	@result << "TYPE #{v.strip.downcase},\n" if v.strip != ""
-			  when "DBSTRUCT"
-			 	@result << "TYPE STANDARD TABLE OF #{v.strip.downcase},\n" if v.strip != ""
-			  when "TYP"
-			 	@result << "TYPE #{v.strip.downcase { |n|  }},\n" if v.strip != ""
-			else				
-				@result << "#{"*" if line["OPTIONAL"] == "X"}     #{v.strip.downcase} ".ljust(len + 7)
-			end 
-		end
-	end
+  def get_interface(object)
+    def add_data
+      if @result[0] =~ /.*\*.*/
+        @result.insert(0, "DATA: \n")
+      else
+        @result[0] = "DATA: " + @result[0].lstrip
+      end
+    end
 
-	def get_interface(object)		
-		def add_data
-			if @result[0] =~ /.*\*.*/				
-				@result.insert(0, "DATA: \n")
-			else
-				@result[0] = "DATA: " + @result[0].lstrip 		
-			end			
-		end
+    def change_last_char_to_point
+      @result[-1] = @result[-1].chop.chop
 
-		def change_last_char_to_point
-			@result[-1] = @result[-1].chop.chop			
-			if @result[-2] =~ /.*["|\*]/
-				@result << "\n."				
-			else
-				@result << "."
-			end
-		end
+      if @result[-2] =~ /.*["|\*]/
+        @result << "\n."
+      else
+        @result << "."
+      end
+    end
+ 
+    def processing(get_interface,get_stub)
+      get_interface.call
+      add_data
+      change_last_char_to_point
+      @result << "\n"
+      @result << "\n"
+      get_stub.call
+    end
 
-		if object =~ /=>/
-			get_method_interface(object)
-			add_data
-			change_last_char_to_point
-			@result << "\n"
-			@result << "\n"
-			get_method_stub(object)
-		else
-			get_fm_interface(object)
-			add_data
-			change_last_char_to_point
-			@result << "\n"
-			@result << "\n"
-			get_fm_stub(object)
-		end			
+    if is_method_call?(object)
+      processing( Proc.new{ get_method_interface(object) },
+                  Proc.new{ get_method_stub(object) })
+    else
+      processing( Proc.new{ get_fm_interface(object) },
+                  Proc.new{ get_fm_stub(object) })
+    end
+    
+    @result    
+  end
 
-		Clipboard.copy(@result.join(""))
-	end
+  def get_method_interface(object)
+    call("Z_CLASS_IMPORT_METH_INTERFACE",SYSTEM) do |f|
+      object =~ /(.*)[=|-]>(.*)/
 
-	def get_method_interface(object)
-		call("Z_CLASS_IMPORT_METH_INTERFACE",SYSTEM) do |f|
-			object =~ /(.*)=>(.*)/
+      f.I_CLASS = $1
+      f.I_METHOD = $2
 
-			f.I_CLASS = $1
-			f.I_METHOD = $2
+      f.invoke_new
+      len = 0
 
-			f.invoke_new
+      f.ET_PARAMETERS.each do |line|
+        line.select{|k,v| k == "SCONAME"}.each do |k,v|
+          len = v.strip.length if v.strip.length > len
+        end
+      end
 
-			len = 0
+      f.ET_PARAMETERS.each do |line|
+        line.select{|k,v| k == "SCONAME" || k == "TYPE" || k == "TYPTYPE"}.each do |k,v|
+          case k
+          when "TYPE"
+            @result << " #{v.strip}#{' value ' +  line['PARVALUE'].strip if line['PARVALUE'].strip != '' }\,\n".downcase
+          when "TYPTYPE"
+            if v == "1"
+              @result << " TYPE"
+            elsif v == "3"
+              @result << " TYPE REF TO"
+            end
+          else
+            @result << "#{"*" if line["PAROPTIONL"] == "X" || line["PARVALUE"].strip != ""}      #{v.strip} ".ljust(len + 8).downcase
+          end
+        end
+      end
+    end
+  end
 
-			f.ET_PARAMETERS.each do |line|				
-				line.select{|k,v| k == "SCONAME"}.each do |k,v|
-					len = v.strip.length if v.strip.length > len
-				end
-			end			
+  def get_fm_interface(function_module)
+    call("FUNCTION_IMPORT_INTERFACE",SYSTEM) do |f|
+      f.FUNCNAME = function_module
+      f.invoke_new
+      len = max_len(f)
 
-			f.ET_PARAMETERS.each do |line|				
-				line.select{|k,v| k == "SCONAME" || k == "TYPE" || k == "TYPTYPE"}.each do |k,v|
-					case k
-						when "TYPE"													
-							@result << " #{v.strip},\n".downcase
-						when "TYPTYPE"
-							if v == "1"
-								@result << " TYPE"
-							elsif v == "3"
-								@result << " TYPE REF TO"	
-							end	
-						else
-							@result << "#{"*" if line["PAROPTIONL"] == "X"}      #{v.strip} ".ljust(len + 7).downcase
-					end					
-				end
-			end
-		end
-	end
+      f.IMPORT_PARAMETER.each do |line|
+        line_processing(line,len)
+      end
 
-	def get_fm_interface(function_module)
-		call("FUNCTION_IMPORT_INTERFACE",SYSTEM) do |f|
-			f.FUNCNAME = function_module
+      f.EXPORT_PARAMETER.each do |line|
+        line_processing(line,len)
+      end
 
-			f.invoke_new
+      f.CHANGING_PARAMETER.each do |line|
+        line_processing(line,len)
+      end
 
-			len = max_len(f)
-			
-			f.IMPORT_PARAMETER.each do |line|
-				line_processing(line,len)
-			end
+      f.TABLES_PARAMETER.each do |line|
+        line_processing(line,len)
+      end
+    end
+  end
 
-			f.EXPORT_PARAMETER.each do |line|
-				line_processing(line,len)
-			end
+  def get_fm_stub(function_module)
+    call("Z_FUNCTION_STUB_GENERATE",SYSTEM) do |f|
+      f.FUNCNAME = function_module
+      f.invoke_new
+      source_processing(f.SOURCE)
+    end
+  end
 
-			f.CHANGING_PARAMETER.each do |line|
-				line_processing(line,len)
-			end
+  def get_method_stub(object)
+    call("Z_METHOD_STUB_GENERATE",SYSTEM) do |f|
+      object =~ /(.*)[=|-]>(.*)/
 
-			f.TABLES_PARAMETER.each do |line|
-				line_processing(line,len)
-			end			
-		end		
-	end
+      f.MTDKEY = { "CLSNAME" => $1,
+                   "CPDNAME" => $2 }
 
-	def get_fm_stub(function_module)
-		call("Z_FUNCTION_STUB_GENERATE",SYSTEM) do |f|
-			f.FUNCNAME = function_module
+      f.invoke_new
 
-			f.invoke_new
+      source_processing(f.PATTERNSOURCE)
+    end
+  end
 
-			source_processing(f.SOURCE)			
-		end
-	end
+  def line_processing(line, len)
+    line.select{|k,v| k == "PARAMETER" or
+                      k =~ /DB/ or
+                      k == "TYP" }.each do |k,v|
+      case k
+        when "DBFIELD"
+          @result << "TYPE #{v.strip.downcase},\n" if v.strip != ""
+        when "DBSTRUCT"
+          @result << "TYPE STANDARD TABLE OF #{v.strip.downcase},\n" if v.strip != ""
+        when "TYP"
+          @result << "TYPE #{v.strip.downcase { |n|  }},\n" if v.strip != ""
+        else
+          @result << "#{"*" if line["OPTIONAL"] == "X"}     #{v.strip.downcase} ".ljust(len + 8) + "#{" " if line["OPTIONAL"] == "X"}"
+      end
+    end
+  end
 
-	def get_method_stub(object)
-		call("Z_METHOD_STUB_GENERATE",SYSTEM) do |f|			
-			object =~ /(.*)=>(.*)/
+  def source_processing(source)
+    source.each do |line|
+      line.each do |k,v|
+        if v =~ /(["|\*])?(.*)=[^>](.*)/
+          left_side    = $2
+          right_side ||= $3
 
-			f.MTDKEY = { "CLSNAME" => $1,
-						 "CPDNAME" => $2 }
-
-			f.invoke_new
-
-			source_processing(f.PATTERNSOURCE)
-		end
-	end
-
-	def source_processing(source)
-		source.each do |line|
-			line.each do |k,v|
-				if v =~ /(["|\*])?(.*)=[^>](.*)/
-					@result << "#{"*" if $1} #{$2 if $2}= #{$3.strip} \n".downcase
-				elsif v =~ /(")(.*)/
-					@result << "*#{$2}\n"
-				else
-					@result << "#{v}\n"
-				end
-			end				
-		end
-	end
+          @result << "#{"* " if $1} #{left_side if left_side}= #{ right_side =~ /[0-9]/ ? right_side.strip : left_side.strip} \n".downcase
+        elsif v =~ /(")(.*)/
+          @result << "*#{$2}\n"
+        else
+          @result << "#{v.strip}\n"
+        end
+      end
+    end
+  end
 end
 
-fm_if = FM_Interface.new
-fm_if.get_interface(ARGV[0].upcase)                                            
+if ARGV[0]
+  fm_if = FM_Interface.new
+  result = fm_if.get_interface(ARGV[0].upcase)
+  Clipboard.copy(result.join(""))
+else
+  require 'test/unit'
+  require 'test/unit/assertions'
 
+  module Test::Unit
+    # Used to fix a minor minitest/unit incompatibility in flexmock 
+    AssertionFailedError = Class.new(StandardError)
+    
+    class TestCase
+      def self.must(name, &block)
+        test_name = "test_#{name.gsub(/\s+/,'_')}".to_sym
+
+        defined = instance_method(test_name) rescue false
+
+        raise "#{test_name} is already defined in #{self}" if defined
+
+        if block_given?
+          define_method(test_name, &block)
+        else
+          define_method(test_name) do
+            flunk "No implementation provided for #{name}"
+          end
+        end
+      end
+    end
+  end
+
+  class TestFM_Interface < Test::Unit::TestCase
+    def setup
+      @fm_if = FM_Interface.new
+      @result = []
+    end
+
+    def assert_include(data)
+      assert(@result.include?(data))      
+    end
+
+    must("Valid result if called with function module") do 
+      @result = @fm_if.get_interface("SEOM_CALL_METHOD_PATTERN_NEW")
+
+      assert_include("DATA: mtdkey              ")
+      assert_include("*     enhancement         ")
+      assert_include("TYPE swbse_max_line_tab")
+      assert_include(".")
+
+      assert_include("     mtdkey                    = mtdkey \n")
+      assert_include("* EXCEPTIONS\n")
+      assert_include("*     method_not_existing       = 1 \n")
+    end
+
+    must("Valid result if called with a bapi function module") do
+      @result = @fm_if.get_interface("BAPI_ALM_NOTIF_CREATE")
+      
+      assert_include("DATA: \n")
+      assert_include("*     external_number                 ")
+      assert_include("TYPE bapi2080_nothdre-notif_no,\n")
+      assert_include("CALL FUNCTION 'BAPI_ALM_NOTIF_CREATE'\n")
+    end
+
+    must("Valid result if called with a static method") do
+      @result = @fm_if.get_interface("cl_gui_frontend_services=>directory_browse")
+      
+      Clipboard.copy(@result.join(""))
+
+      assert_include("DATA: \n")
+      assert_include("      selected_folder  ")
+      assert_include(" TYPE")
+      assert_include(" string")
+      assert_include(".")
+      assert_include("     selected_folder      = selected_folder \n")
+      assert_include("*      not_supported_by_gui = 3 \n")
+      assert_include("CL_GUI_FRONTEND_SERVICES=>DIRECTORY_BROWSE(\n")
+      assert_include(").\n")
+    end
+  end
+end
