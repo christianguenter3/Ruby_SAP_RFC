@@ -38,8 +38,8 @@ class FM_Interface
     len
   end
 
-  def is_method_call?(object)
-    object =~ /[=|-]>/
+  def is_method_call?(object)    
+    object =~ /(.*)[=|-](.*)>/      
   end
 
   def get_interface(object)
@@ -189,7 +189,7 @@ class FM_Interface
         elsif v =~ /(")(.*)/
           @result << "*#{$2}\n"
         else
-          @result << "#{v.strip}\n"
+          @result << "#{v.rstrip}\n"
         end
       end
     end
@@ -201,31 +201,7 @@ if ARGV[0]
   result = fm_if.get_interface(ARGV[0].upcase)
   Clipboard.copy(result.join(""))
 else
-  require 'test/unit'
-  require 'test/unit/assertions'
-
-  module Test::Unit
-    # Used to fix a minor minitest/unit incompatibility in flexmock 
-    AssertionFailedError = Class.new(StandardError)
-    
-    class TestCase
-      def self.must(name, &block)
-        test_name = "test_#{name.gsub(/\s+/,'_')}".to_sym
-
-        defined = instance_method(test_name) rescue false
-
-        raise "#{test_name} is already defined in #{self}" if defined
-
-        if block_given?
-          define_method(test_name, &block)
-        else
-          define_method(test_name) do
-            flunk "No implementation provided for #{name}"
-          end
-        end
-      end
-    end
-  end
+  require_relative 'extend_test_unit.rb'
 
   class TestFM_Interface < Test::Unit::TestCase
     def setup
@@ -262,8 +238,7 @@ else
     must("Valid result if called with a static method") do
       @result = @fm_if.get_interface("cl_gui_frontend_services=>directory_browse")
       
-      Clipboard.copy(@result.join(""))
-
+      
       assert_include("DATA: \n")
       assert_include("      selected_folder  ")
       assert_include(" TYPE")
@@ -272,7 +247,17 @@ else
       assert_include("     selected_folder      = selected_folder \n")
       assert_include("*      not_supported_by_gui = 3 \n")
       assert_include("CL_GUI_FRONTEND_SERVICES=>DIRECTORY_BROWSE(\n")
-      assert_include(").\n")
+      assert_include("       ).\n")
+    end
+
+    must("valid declarations with default parameters") do
+      @result = @fm_if.get_interface("cl_gui_frontend_services=>gui_download")
+                      
+      assert_include("*      write_field_separator     ")
+      assert_include(" TYPE")
+      assert_include(" char01 value space,\n")
+      assert_include("*      write_field_separator     = write_field_separator \n")
     end
   end
 end
+
