@@ -7,19 +7,12 @@ class PrettyPrinter
 
   def pretty_print(print_string)
   	call("Z_PRETTY_PRINTER",SYSTEM) do |f|    
-  		start_array_size = print_string.length
-
-  		f.C_SOURCE = []
-  		print_string.each {|s| f.C_SOURCE << { "LINE" => s.rstrip }}
+  		
+  		f.C_SOURCE = print_string.map{|s| { "LINE" => s.rstrip }}
 
   		f.invoke_new
 
-  		result = []
-			f.C_SOURCE.each_with_index do |line,index|
-				result << line["LINE"] if index >= start_array_size
-			end	
-
-  		return result
+			return f.C_SOURCE[print_string.length..-1].map{|line, index| line["LINE"] }
   	end	
   end
 end

@@ -42,7 +42,7 @@ class FM_Interface
     object =~ /(.*)[=|-](.*)>/      
   end
 
-  def get_interface(object)
+  def get_interface(object,option={})
     def add_data
       if @result[0] =~ /.*\*.*/
         @result.insert(0, "DATA: \n")
@@ -61,21 +61,23 @@ class FM_Interface
       end
     end
  
-    def processing(get_interface,get_stub)
+    def processing(get_interface,get_stub,option={})
       get_interface.call
       add_data
       change_last_char_to_point
       @result << "\n"
       @result << "\n"
-      get_stub.call
+      get_stub.call if option.has_key?("WITH_CALL")
     end
 
     if is_method_call?(object)
       processing( Proc.new{ get_method_interface(object) },
-                  Proc.new{ get_method_stub(object) })
+                  Proc.new{ get_method_stub(object) },
+                  option)
     else
       processing( Proc.new{ get_fm_interface(object) },
-                  Proc.new{ get_fm_stub(object) })
+                  Proc.new{ get_fm_stub(object) },
+                  option)
     end
     
     @result    
@@ -198,7 +200,9 @@ end
 
 if ARGV[0]
   fm_if = FM_Interface.new
-  result = fm_if.get_interface(ARGV[0].upcase)
+  option = {}
+  option[ARGV[1]] = true
+  result = fm_if.get_interface(ARGV[0].upcase,option)
   Clipboard.copy(result.join(""))
 else
   require_relative 'extend_test_unit.rb'
@@ -213,8 +217,12 @@ else
       assert(@result.include?(data))      
     end
 
+    def assert_not_include(data)
+      assert(!@result.include?(data))      
+    end
+
     must("Valid result if called with function module") do 
-      @result = @fm_if.get_interface("SEOM_CALL_METHOD_PATTERN_NEW")
+      @result = @fm_if.get_interface("SEOM_CALL_METHOD_PATTERN_NEW",{"WITH_CALL" => true})
 
       assert_include("DATA: mtdkey              ")
       assert_include("*     enhancement         ")
@@ -227,7 +235,7 @@ else
     end
 
     must("Valid result if called with a bapi function module") do
-      @result = @fm_if.get_interface("BAPI_ALM_NOTIF_CREATE")
+      @result = @fm_if.get_interface("BAPI_ALM_NOTIF_CREATE",{"WITH_CALL" => true})
       
       assert_include("DATA: \n")
       assert_include("*     external_number                 ")
@@ -236,7 +244,7 @@ else
     end
 
     must("Valid result if called with a static method") do
-      @result = @fm_if.get_interface("cl_gui_frontend_services=>directory_browse")
+      @result = @fm_if.get_interface("cl_gui_frontend_services=>directory_browse",{"WITH_CALL" => true})
       
       
       assert_include("DATA: \n")
@@ -251,12 +259,18 @@ else
     end
 
     must("valid declarations with default parameters") do
-      @result = @fm_if.get_interface("cl_gui_frontend_services=>gui_download")
+      @result = @fm_if.get_interface("cl_gui_frontend_services=>gui_download",{"WITH_CALL" => true})
                       
       assert_include("*      write_field_separator     ")
       assert_include(" TYPE")
       assert_include(" char01 value space,\n")
       assert_include("*      write_field_separator     = write_field_separator \n")
+    end
+
+    must("valid declarations without call") do 
+      @result = @fm_if.get_interface("BAPI_ALM_NOTIF_CREATE",{})
+
+      assert_not_include("CALL FUNCTION 'BAPI_ALM_NOTIF_CREATE'\n")
     end
   end
 end
